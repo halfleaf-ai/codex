@@ -188,6 +188,13 @@ pub(crate) struct AnyToolResult {
     pub(crate) payload: ToolPayload,
     pub(crate) result: Box<dyn ToolOutput>,
     pub(crate) post_tool_use_payload: Option<PostToolUsePayload>,
+    pub(crate) kind: ToolResultKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ToolResultKind {
+    Completed,
+    Aborted,
 }
 
 impl AnyToolResult {
@@ -793,6 +800,7 @@ async fn handle_any_tool(
         payload,
         result: output,
         post_tool_use_payload,
+        kind: ToolResultKind::Completed,
     })
 }
 

@@ -273,6 +273,7 @@ async fn recovery_rejects_active_turn_without_injecting_or_applying_settings() {
             ..Default::default()
         },
         TurnStartOptions::default(),
+        Vec::new(),
         "recovered-turn".to_string(),
     )
     .await

@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -244,6 +245,7 @@ mod token_budget;
 pub(crate) mod turn;
 pub(crate) mod turn_context;
 mod turn_input;
+mod turn_recovery;
 mod turn_suspension;
 mod world_state;
 use self::code_mode_warning::unsupported_code_mode_warning;
@@ -912,6 +914,7 @@ impl SessionIo {
         &self,
         thread_settings: ThreadSettingsOverrides,
         start_options: TurnStartOptions,
+        dynamic_tool_responses: Vec<codex_protocol::turn_input::RecoverDynamicToolResponse>,
         trace: Option<W3cTraceContext>,
         turn_id: String,
     ) -> CodexResult<TurnInputSubmission> {
@@ -921,6 +924,7 @@ impl SessionIo {
             op: Op::RecoverTurn {
                 thread_settings,
                 start_options,
+                dynamic_tool_responses,
                 reply: reply_tx,
             },
             trace,

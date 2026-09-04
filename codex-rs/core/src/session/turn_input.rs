@@ -30,6 +30,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::NonSteerableTurnKind;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::turn_input::NotSubmittedReason;
+use codex_protocol::turn_input::RecoverDynamicToolResponse;
 use codex_protocol::turn_input::TurnInput as SubmittedTurnInput;
 use codex_protocol::turn_input::TurnInputMode;
 use codex_protocol::turn_input::TurnInputRequest;
@@ -211,7 +212,7 @@ pub(super) async fn handle(
                 | SubmittedTurnInput::ResponseItem(_)
                 | SubmittedTurnInput::InterAgentCommunication(_) => TurnStartKind::Automatic,
             };
-            start_if_idle(session, request, submission_id, kind).await
+            start_if_idle(session, request, Vec::new(), submission_id, kind).await
         }
         TurnInputMode::Steer { expected_turn_id } => {
             steer(session, request, expected_turn_id, submission_id).await
@@ -223,6 +224,7 @@ pub(super) async fn handle_recovery(
     session: &Arc<Session>,
     thread_settings: ThreadSettingsOverrides,
     start_options: TurnStartOptions,
+    dynamic_tool_responses: Vec<RecoverDynamicToolResponse>,
     submission_id: String,
 ) -> CodexResult<TurnInputSubmission> {
     let request = TurnInputRequest::user_input(Vec::new())
@@ -231,7 +233,14 @@ pub(super) async fn handle_recovery(
             turn_trigger: Some("retry".to_string()),
             ..start_options
         });
-    start_if_idle(session, request, submission_id, TurnStartKind::Recovery).await
+    start_if_idle(
+        session,
+        request,
+        dynamic_tool_responses,
+        submission_id,
+        TurnStartKind::Recovery,
+    )
+    .await
 }
 
 async fn start_or_steer(
@@ -327,6 +336,7 @@ async fn start_or_steer(
 async fn start_if_idle(
     session: &Arc<Session>,
     request: TurnInputRequest,
+    dynamic_tool_responses: Vec<RecoverDynamicToolResponse>,
     submission_id: String,
     kind: TurnStartKind,
 ) -> CodexResult<TurnInputSubmission> {
@@ -373,6 +383,20 @@ async fn start_if_idle(
         });
     }
 
+    let recovered_dynamic_tool_outputs = match super::turn_recovery::prepare_dynamic_tool_outputs(
+        session,
+        &submission_id,
+        dynamic_tool_responses,
+    )
+    .await
+    {
+        Ok(outputs) => outputs,
+        Err(error) => {
+            session.clear_reserved_idle_turn(&turn_state).await;
+            return Err(error);
+        }
+    };
+
     let settings = match PreparedTurnInputSettings::prepare(session, thread_settings, start).await {
         Ok(settings) => settings,
         Err(error) => {
@@ -410,6 +434,17 @@ async fn start_if_idle(
         turn_context
             .turn_metadata_state
             .set_root_turn_id(submission_id.clone());
+    }
+    if !recovered_dynamic_tool_outputs.is_empty() {
+        session
+            .record_conversation_items(turn_context.as_ref(), &recovered_dynamic_tool_outputs)
+            .await;
+        if let Err(error) = session.flush_rollout().await {
+            session.clear_reserved_idle_turn(&turn_state).await;
+            return Err(CodexErr::Fatal(format!(
+                "failed to persist recovered dynamic-tool responses: {error}"
+            )));
+        }
     }
     session
         .maybe_emit_model_warnings_for_turn(turn_context.as_ref())

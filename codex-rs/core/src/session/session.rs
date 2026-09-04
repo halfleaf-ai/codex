@@ -67,6 +67,8 @@ pub(crate) struct Session {
     pub(crate) conversation: Arc<RealtimeConversationManager>,
     pub(crate) realtime_history: Option<Mutex<crate::realtime_history::RealtimeHistoryState>>,
     pub(crate) active_turn: Mutex<Option<ActiveTurn>>,
+    /// Set only while releasing an unfinished turn to a replacement runtime.
+    pub(crate) suspending_for_handoff: AtomicBool,
     pub(crate) async_hook_results: async_channel::Receiver<HookCompletedEvent>,
     pub(crate) input_queue: InputQueue,
     pub(crate) guardian_review_session: GuardianReviewSessionManager,
@@ -1507,6 +1509,7 @@ impl Session {
                     && services.live_thread.is_some())
                 .then(|| Mutex::new(Default::default())),
                 active_turn: Mutex::new(None),
+                suspending_for_handoff: AtomicBool::new(false),
                 async_hook_results,
                 input_queue: InputQueue::new(),
                 guardian_review_session: GuardianReviewSessionManager::default(),

@@ -7,6 +7,7 @@ use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::turn_input::SuspendTurnOutcome;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tracing::warn;
 
@@ -69,6 +70,9 @@ pub(super) async fn suspend_turn_and_shutdown(
     let turn_id = task.turn_context.sub_id.clone();
     // Normal shutdown records a terminal turn event, preventing another worker from
     // recovering this turn under its original ID. Cancel the task without that event.
+    session
+        .suspending_for_handoff
+        .store(true, Ordering::Release);
     task.cancellation_token.cancel();
     task.turn_context
         .turn_metadata_state

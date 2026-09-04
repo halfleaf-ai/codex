@@ -2194,6 +2194,9 @@ async fn drain_in_flight(
                 sess.record_annotated_conversation_items(&turn_context, vec![envelope])
                     .await;
             }
+            Err(err)
+                if matches!(err.details(), CodexErrorDetails::TurnAborted)
+                    && sess.suspending_for_handoff.load(Ordering::Acquire) => {}
             Err(err) => {
                 error_or_panic(format!("in-flight tool future failed during drain: {err}"));
             }

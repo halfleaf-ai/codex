@@ -1,5 +1,6 @@
 //! Turn-input request and result types shared by Core's submission APIs.
 
+use crate::dynamic_tools::DynamicToolResponse;
 use crate::models::ResponseItem;
 use crate::protocol::AdditionalContextEntry;
 use crate::protocol::InterAgentCommunication;
@@ -63,6 +64,15 @@ pub struct RecoverTurnRequest {
     pub trace: Option<W3cTraceContext>,
     /// Program recorded in the interrupted turn's persisted context.
     pub cyber_access_program: Option<CyberAccessProgram>,
+}
+
+/// A dynamic-tool result completed outside the runtime that started the turn.
+///
+/// Recovery records these results durably before it resumes model sampling.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecoverDynamicToolResponse {
+    pub call_id: String,
+    pub response: DynamicToolResponse,
 }
 
 impl TurnInputRequest {
