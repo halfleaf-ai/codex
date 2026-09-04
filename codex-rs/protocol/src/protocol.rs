@@ -627,6 +627,7 @@ pub enum Op {
     RecoverTurn {
         thread_settings: ThreadSettingsOverrides,
         start_options: TurnStartOptions,
+        dynamic_tool_responses: Vec<crate::turn_input::RecoverDynamicToolResponse>,
         reply: oneshot::Sender<CodexResult<TurnInputSubmission>>,
     },
 

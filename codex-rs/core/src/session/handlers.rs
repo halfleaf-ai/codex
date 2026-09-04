@@ -594,12 +594,14 @@ pub(super) async fn submission_loop(
                 Op::RecoverTurn {
                     thread_settings,
                     start_options,
+                    dynamic_tool_responses,
                     reply,
                 } => {
                     let result = turn_input::handle_recovery(
                         &sess,
                         thread_settings,
                         start_options,
+                        dynamic_tool_responses,
                         sub.id.clone(),
                     )
                     .await;

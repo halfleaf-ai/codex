@@ -358,6 +358,17 @@ impl CodexThread {
         &self,
         request: RecoverTurnRequest,
     ) -> CodexResult<StartIfIdleSubmission> {
+        self.recover_turn_with_dynamic_tool_responses_if_idle(request, Vec::new())
+            .await
+    }
+
+    /// Resumes an interrupted turn after durably recording dynamic-tool results
+    /// completed by an external orchestrator.
+    pub async fn recover_turn_with_dynamic_tool_responses_if_idle(
+        &self,
+        request: RecoverTurnRequest,
+        dynamic_tool_responses: Vec<crate::RecoverDynamicToolResponse>,
+    ) -> CodexResult<StartIfIdleSubmission> {
         self.session
             .services
             .agent_control
@@ -382,7 +393,13 @@ impl CodexThread {
         };
         match self
             .io
-            .submit_recover_turn(thread_settings, start_options, trace, turn_id)
+            .submit_recover_turn(
+                thread_settings,
+                start_options,
+                dynamic_tool_responses,
+                trace,
+                turn_id,
+            )
             .await?
         {
             TurnInputSubmission::Started { turn_id } => {

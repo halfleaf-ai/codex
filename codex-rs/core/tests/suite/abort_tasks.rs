@@ -4,7 +4,9 @@ use codex_core::SuspendTurnOutcome;
 use codex_core::TurnInputRequest;
 use codex_history::RolloutItem;
 use codex_history::RolloutLine;
+use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem;
 use codex_protocol::dynamic_tools::DynamicToolFunctionSpec;
+use codex_protocol::dynamic_tools::DynamicToolResponse;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
@@ -297,12 +299,23 @@ async fn root_turn_suspension_preserves_pending_dynamic_tool_call() {
 
     resumed
         .codex
-        .recover_turn_if_idle(codex_core::RecoverTurnRequest {
-            turn_id,
-            thread_settings: Default::default(),
-            trace: None,
-            cyber_access_program: None,
-        })
+        .recover_turn_with_dynamic_tool_responses_if_idle(
+            codex_core::RecoverTurnRequest {
+                turn_id,
+                thread_settings: Default::default(),
+                trace: None,
+                cyber_access_program: None,
+            },
+            vec![codex_core::RecoverDynamicToolResponse {
+                call_id: call_id.to_string(),
+                response: DynamicToolResponse {
+                    content_items: vec![DynamicToolCallOutputContentItem::InputText {
+                        text: "workspace-ready".to_string(),
+                    }],
+                    success: true,
+                },
+            }],
+        )
         .await
         .expect("recover the unfinished turn");
     wait_for_event(&resumed.codex, |event| {
@@ -312,7 +325,10 @@ async fn root_turn_suspension_preserves_pending_dynamic_tool_call() {
 
     let request = recovery_mock.single_request();
     assert!(request.has_function_call(call_id));
-    assert_eq!(request.function_call_output_text(call_id), None);
+    assert_eq!(
+        request.function_call_output(call_id)["output"],
+        json!([{"type": "input_text", "text": "workspace-ready"}])
+    );
 }
 
 /// After an interrupt we expect the next request to the model to include both

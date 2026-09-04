@@ -23,6 +23,7 @@ use crate::tools::context::ToolPayload;
 use crate::tools::lifecycle::notify_tool_aborted;
 use crate::tools::registry::AnyToolResult;
 use crate::tools::registry::ToolArgumentDiffConsumer;
+use crate::tools::registry::ToolResultKind;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
 use codex_history::ResponseItemEnvelope;
@@ -78,9 +79,16 @@ impl ToolCallRuntime {
     ) -> impl std::future::Future<Output = Result<ResponseItemEnvelope, CodexErr>> {
         let error_call = call.clone();
         let source = call.direct_source();
+        let session = Arc::clone(&self.session);
         let future = self.handle_tool_call_with_source(call, source, cancellation_token);
         async move {
             match future.await {
+                Ok(response)
+                    if response.kind == ToolResultKind::Aborted
+                        && session.suspending_for_handoff.load(Ordering::Acquire) =>
+                {
+                    Err(CodexErr::TurnAborted)
+                }
                 Ok(response) => Ok(response.into_response()),
                 Err(FunctionCallError::Fatal(message)) => Err(CodexErr::Fatal(message)),
                 Err(other) => Ok(ResponseItemEnvelope::new(
@@ -251,6 +259,7 @@ impl ToolCallRuntime {
                 message: Self::abort_message(call, secs),
             }),
             post_tool_use_payload: None,
+            kind: ToolResultKind::Aborted,
         }
     }
 
