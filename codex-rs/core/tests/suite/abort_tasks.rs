@@ -4,6 +4,9 @@ use codex_core::SuspendTurnOutcome;
 use codex_core::TurnInputRequest;
 use codex_history::RolloutItem;
 use codex_history::RolloutLine;
+use codex_protocol::dynamic_tools::DynamicToolFunctionSpec;
+use codex_protocol::dynamic_tools::DynamicToolSpec;
+use pretty_assertions::assert_eq;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -203,6 +206,113 @@ async fn root_turn_suspension_preserves_unfinished_turn_history() {
         unreachable!("wait_for_event returned unexpected event");
     };
     assert_eq!(completed.turn_id, turn_id);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn root_turn_suspension_preserves_pending_dynamic_tool_call() {
+    let server = start_mock_server().await;
+    let call_id = "durable-tool-call";
+    let tool_name = "read_workspace";
+    mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("tool_response"),
+            ev_function_call(call_id, tool_name, "{}"),
+            ev_completed("tool_response"),
+        ]),
+    )
+    .await;
+
+    let base_test = test_codex()
+        .with_model("gpt-5.4")
+        .build_with_auto_env(&server)
+        .await
+        .expect("start persistent root thread");
+    let new_thread = base_test
+        .thread_manager
+        .start_thread(StartThreadOptions {
+            dynamic_tools: vec![DynamicToolSpec::Function(DynamicToolFunctionSpec {
+                name: tool_name.to_string(),
+                description: "Read a workspace file.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false,
+                }),
+                defer_loading: false,
+            })],
+            ..StartThreadOptions::new(base_test.config.clone())
+        })
+        .await
+        .expect("start thread with a dynamic tool");
+    let mut test = base_test;
+    test.codex = new_thread.thread;
+    test.session_configured = new_thread.session_configured;
+
+    let submitted = test
+        .codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "Read the workspace".to_string(),
+            text_elements: Vec::new(),
+        }]))
+        .await
+        .expect("start turn");
+    let codex_core::TurnInputSubmission::Started { turn_id } = submitted else {
+        panic!("expected a started root turn");
+    };
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::DynamicToolCallRequest(_))
+    })
+    .await;
+
+    assert_eq!(
+        test.codex
+            .suspend_turn_and_shutdown()
+            .await
+            .expect("suspend the turn while its dynamic tool waits"),
+        SuspendTurnOutcome::Suspended {
+            turn_id: turn_id.clone(),
+        },
+    );
+    let rollout_path = test.codex.rollout_path().expect("rollout path");
+    test.thread_manager
+        .remove_thread(&test.session_configured.thread_id)
+        .await
+        .expect("unload the suspended root");
+
+    let recovery_server = start_mock_server().await;
+    let recovery_mock = mount_sse_once(
+        &recovery_server,
+        sse(vec![
+            ev_response_created("recovered_response"),
+            ev_completed("recovered_response"),
+        ]),
+    )
+    .await;
+    let resumed = test_codex()
+        .with_model("gpt-5.4")
+        .resume(&recovery_server, Arc::clone(&test.home), rollout_path)
+        .await
+        .expect("resume the suspended root on a replacement runtime");
+
+    resumed
+        .codex
+        .recover_turn_if_idle(codex_core::RecoverTurnRequest {
+            turn_id,
+            thread_settings: Default::default(),
+            trace: None,
+            cyber_access_program: None,
+        })
+        .await
+        .expect("recover the unfinished turn");
+    wait_for_event(&resumed.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+
+    let request = recovery_mock.single_request();
+    assert!(request.has_function_call(call_id));
+    assert_eq!(request.function_call_output_text(call_id), None);
 }
 
 /// After an interrupt we expect the next request to the model to include both
